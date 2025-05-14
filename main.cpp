@@ -3,33 +3,32 @@
 #include <iostream>
 #include <random>    // 添加随机数库
 #include <algorithm> // 添加algorithm库，包含shuffle函数
+// #include "skill_functions.h" // 引入技能函数头文件
 
 using namespace std;
-const int map_len = 10;
+const int map_len = 20;
 
 // 全局随机数生成器
 random_device g_rd;
 mt19937 g_gen(g_rd());
 uniform_int_distribution<> g_dice_dist(1, 3); // 骰子分布 (1-3)
 
-// 修改技能函数定义，不再接受步数参数，而是自己生成步数
-// 默认技能：正常移动1-3步
-int move_origin()
-{
-    return g_dice_dist(g_gen); // 直接返回1-3的随机数
-}
+// 前向声明
+struct map;
 
-// 技能：步数+1
-int move_plus_one()
+struct SkillResult
 {
-    return g_dice_dist(g_gen) + 1; // 随机数+1
-}
+    int steps;            // 移动步数
+    bool skill_activated; // 是否触发技能
 
-// 技能：步数翻倍
-int move_double()
-{
-    return g_dice_dist(g_gen) * 2; // 随机数*2
-}
+    SkillResult(int s, bool activated = false) : steps(s), skill_activated(activated) {}
+};
+
+// 技能函数类型定义，返回SkillResult
+typedef SkillResult (*skill_func_t)(int pos, const map *game_map);
+
+// 前向声明默认技能函数
+SkillResult default_skill(int pos, const map *game_map);
 
 struct char_node
 {
@@ -39,22 +38,22 @@ public:
     char_node *prev;
     int pos;
     bool is_head;
-    // 修改技能函数指针类型，不再接受参数
-    int (*skill)();
+    skill_func_t skill; // 现在已经定义了类型
 
-    // 修改默认技能函数引用全局函数
-    static int default_skill()
-    {
-        return move_origin();
-    }
     char_node(string name)
-        : name(name), next(nullptr), prev(nullptr), pos(0), is_head(false), skill(default_skill) {}
-    char_node(string name, int (*skill_func)() = default_skill)
-        : name(name), next(nullptr), prev(nullptr), pos(0), is_head(false), skill(skill_func) {}
+        : name(name), next(nullptr), prev(nullptr), pos(0), is_head(false), skill(default_skill)
+    {
+    }
+    char_node(string name, skill_func_t skill_func)
+        : name(name), next(nullptr), prev(nullptr), pos(0), is_head(false)
+    {
+        skill = skill_func;
+    }
 
     char_node(bool is_head)
-        : name(""), next(nullptr), prev(nullptr), pos(0), is_head(is_head), skill(default_skill) {}
-
+        : name(""), next(nullptr), prev(nullptr), pos(0), is_head(is_head), skill(default_skill)
+    {
+    }
     int get_pos() const
     {
         return pos;
@@ -73,39 +72,64 @@ public:
         else
             return next->get_end();
     }
-    void move(int step)
+    int move(int step, bool skill_activated)
     {
+        if (name == "椿" && skill_activated)
+        {
+            if (prev)
+            {
+                prev->next = this->next;
+                this->next->prev = prev;
+            }
+            this->next = nullptr;
+            this->pos += step;
+            return 1;
+        }
         if (prev)
             prev->next = nullptr;
         char_node *temp = this;
+        int num = 0;
+        int pos = this->pos;
+        int new_pos = pos + step;
         while (temp)
         {
-            temp->pos += step;
+            ++num;
+            temp->pos = new_pos;
             temp = temp->next;
         }
+        return num;
     }
 };
-
 struct map
 {
 public:
     vector<char_node *> _map;
-    map(int len) : _map(len, nullptr)
+    vector<int> cell_count; // 添加格子角色计数数组
+
+    map(int len) : _map(len, nullptr), cell_count(len, 0) // 初始化格子角色计数数组
     {
         for (int i = 0; i < len; i++)
         {
             _map[i] = new char_node(true);
         }
     }
+
     bool move(char_node *node)
     {
         int pos = node->get_pos();
-        // 直接调用技能函数获取步数
-        int actual_step = node->skill();
+        // 传入当前位置和地图指针到技能函数，获取技能结果
+        SkillResult result = node->skill(pos, this);
+        int actual_step = result.steps;
         int new_pos = pos + actual_step;
 
         // 添加调试信息 - 记录角色信息
         string character_name = node->name;
+
+        // 输出技能触发信息
+        if (result.skill_activated)
+        {
+            cout << "【" << character_name << " 技能触发】" << endl;
+        }
 
         if (new_pos >= map_len)
         {
@@ -114,7 +138,10 @@ public:
             return false;
         }
         char_node *new_pos_node = _map[new_pos];
-        node->move(actual_step); // 使用计算后的步数
+        int num = node->move(actual_step, result.skill_activated); // 使用计算后的步数
+        if (pos > 0)
+            cell_count[pos] -= num; // 减少起点格子角色数量
+        cell_count[new_pos] += num; // 增加目标格子角色数量
         node->prev = new_pos_node->get_end();
         new_pos_node->get_end()->next = node;
 
@@ -125,6 +152,16 @@ public:
         return true;
     }
 
+    // 获取指定位置的角色数量
+    int get_cell_count(int pos) const
+    {
+        if (pos <= 0 || pos >= cell_count.size())
+        {
+            return 0; // 起点或无效位置返回0
+        }
+        return cell_count[pos];
+    }
+
     // 判断是否是终点
     bool is_finish_point(int pos)
     {
@@ -132,20 +169,109 @@ public:
     }
 };
 
+// 技能结果结构体，包含移动步数和是否触发技能
+
+// 默认技能函数
+SkillResult default_skill(int pos, const map *game_map);
+
+// 柯莱塔技能：28%的概率使得步数翻倍
+SkillResult move_double_28(int pos, const map *game_map);
+
+// 椿技能：50%概率额外移动等同于当前格子角色数量的步数
+SkillResult move_with_crowd_bonus(int pos, const map *game_map);
+
+// 基础技能函数
+SkillResult move_origin(int pos, const map *game_map);
+SkillResult move_plus_one(int pos, const map *game_map);
+SkillResult move_double(int pos, const map *game_map);
+
+// 技能函数实现
+SkillResult default_skill(int pos, const map *game_map)
+{
+    return SkillResult(g_dice_dist(g_gen), false); // 不触发技能，返回随机数
+}
+
+SkillResult move_double_28(int pos, const map *game_map)
+{
+    // 创建0-99的均匀分布
+    static std::uniform_int_distribution<> prob_dist(0, 99);
+
+    // 生成骰子点数
+    int dice_roll = g_dice_dist(g_gen);
+
+    // 生成概率判断值(0-99)
+    int probability = prob_dist(g_gen);
+
+    // 28%的概率翻倍
+    if (probability < 28)
+    {
+        std::cout << "【触发技能】骰子点数翻倍！" << std::endl;
+        return SkillResult(dice_roll * 2, true); // 触发技能，返回翻倍点数
+    }
+    else
+    {
+        return SkillResult(dice_roll, false); // 未触发技能，返回原始点数
+    }
+}
+
+SkillResult move_with_crowd_bonus(int pos, const map *game_map)
+{
+    int dice_roll = g_dice_dist(g_gen);
+    int crowd_bonus = 0;
+
+    // 创建概率分布(0-99)
+    static std::uniform_int_distribution<> prob_dist(0, 99);
+
+    // 检查是否触发技能(50%概率)
+    bool can_trigger = (prob_dist(g_gen) < 50);
+
+    // 获取当前格子的角色数量（不包括自己）
+    if (pos > 0)
+    {
+        crowd_bonus = game_map->get_cell_count(pos) - 1;
+        if (crowd_bonus < 0)
+            crowd_bonus = 0;
+    }
+
+    // 只有在有其他角色且通过50%概率检查时才触发技能
+    if (crowd_bonus > 0 && can_trigger)
+    {
+        std::cout << "【触发技能】当前格有" << crowd_bonus << "个其他角色，额外移动" << crowd_bonus << "步！" << std::endl;
+        return SkillResult(dice_roll + crowd_bonus, true); // 触发技能，增加额外步数
+    }
+
+    return SkillResult(dice_roll, false); // 未触发技能，返回原始点数
+}
+
+SkillResult move_origin(int pos, const map *game_map)
+{
+    return SkillResult(g_dice_dist(g_gen), false); // 不触发技能，返回随机数
+}
+
+SkillResult move_plus_one(int pos, const map *game_map)
+{
+    int dice = g_dice_dist(g_gen);
+    return SkillResult(dice + 1, true); // 触发技能，步数+1
+}
+
+SkillResult move_double(int pos, const map *game_map)
+{
+    int dice = g_dice_dist(g_gen);
+    return SkillResult(dice * 2, true); // 触发技能，步数翻倍
+}
 int main()
 {
     map m(map_len);
-    vector<char_node *> char_list(3);
+    vector<char_node *> char_list(2); // 修改为2个角色
 
     // 使用全局技能函数初始化角色
-    char_list[0] = new char_node("角色A", move_plus_one); // 每次移动多走1步
-    char_list[1] = new char_node("角色B", move_origin);   // 使用默认技能
-    char_list[2] = new char_node("角色C", move_double);   // 步数翻倍
+    char_list[0] = new char_node("椿", move_with_crowd_bonus);
+    char_list[1] = new char_node("柯莱塔", move_double_28); // 使用新技能
+    // 移除第三个角色
 
     cout << "游戏开始！地图长度: " << map_len << endl;
-    cout << "角色A技能: 移动步数+1" << endl;
-    cout << "角色B技能: 正常移动" << endl;
-    cout << "角色C技能: 移动步数翻倍" << endl;
+    cout << "椿技能: 50%概率额外移动当前格其他角色数量的步数" << endl;
+    cout << "柯莱塔技能: 28%的概率使得步数翻倍" << endl;
     cout << "-----------------------------------------" << endl;
 
     bool game_over = false;
