@@ -11,7 +11,8 @@ const int map_len = 20;
 // 全局随机数生成器
 random_device g_rd;
 mt19937 g_gen(g_rd());
-uniform_int_distribution<> g_dice_dist(1, 3); // 骰子分布 (1-3)
+uniform_int_distribution<> g_dice_dist(1, 3);  // 骰子分布 (1-3)
+uniform_int_distribution<> g_range_dist(2, 3); // 守岸人骰子分布 (2-3)
 
 // 前向声明
 struct map;
@@ -29,6 +30,9 @@ typedef SkillResult (*skill_func_t)(int pos, const map *game_map);
 
 // 前向声明默认技能函数
 SkillResult default_skill(int pos, const map *game_map);
+
+// 守岸人技能：骰子只会掷出2或3
+SkillResult move_minimum_two(int pos, const map *game_map);
 
 struct char_node
 {
@@ -79,7 +83,8 @@ public:
             if (prev)
             {
                 prev->next = this->next;
-                this->next->prev = prev;
+                if (this->next)
+                    this->next->prev = prev;
             }
             this->next = nullptr;
             this->pos += step;
@@ -104,7 +109,8 @@ struct map
 {
 public:
     vector<char_node *> _map;
-    vector<int> cell_count; // 添加格子角色计数数组
+    vector<int> cell_count;         // 添加格子角色计数数组
+    vector<char_node *> characters; // 存储所有角色
 
     map(int len) : _map(len, nullptr), cell_count(len, 0) // 初始化格子角色计数数组
     {
@@ -114,17 +120,65 @@ public:
         }
     }
 
+    // 注册角色到地图
+    void register_character(char_node *character)
+    {
+        characters.push_back(character);
+    }
+
+    // 更新并显示排名
+    void update_rankings()
+    {
+        // 按位置排序角色（位置大的排前面）
+        sort(characters.begin(), characters.end(), [](char_node *a, char_node *b)
+             { return a->get_pos() > b->get_pos(); });
+
+        cout << "\n当前排名:" << endl;
+        for (size_t i = 0; i < characters.size(); i++)
+        {
+            cout << "第" << (i + 1) << "名: " << characters[i]->name
+                 << " (位置: " << characters[i]->get_pos() << ")" << endl;
+        }
+    }
+
+    // 通过角色名获取排名
+    int get_rank_by_name(const string &character_name) const
+    {
+        // 创建角色列表副本进行排序
+        vector<char_node *> sorted_chars = characters;
+
+        // 按位置排序角色（位置大的排前面）
+        sort(sorted_chars.begin(), sorted_chars.end(), [](char_node *a, char_node *b)
+             { return a->get_pos() > b->get_pos(); });
+
+        // 查找角色并返回其排名
+        for (size_t i = 0; i < sorted_chars.size(); i++)
+        {
+            if (sorted_chars[i]->name == character_name)
+            {
+                return i + 1; // 排名从1开始
+            }
+        }
+
+        // 未找到该角色
+        return -1;
+    }
+
     bool move(char_node *node)
     {
         int pos = node->get_pos();
         // 传入当前位置和地图指针到技能函数，获取技能结果
         SkillResult result = node->skill(pos, this);
-        int actual_step = result.steps;
-        int new_pos = pos + actual_step;
 
         // 添加调试信息 - 记录角色信息
         string character_name = node->name;
-
+        if (character_name == "卡卡罗" && get_rank_by_name(character_name) == characters.size())
+        {
+            result.steps += 3;
+            result.skill_activated = true;
+        }
+        int actual_step = result.steps;
+        int new_pos = pos + actual_step;
         // 输出技能触发信息
         if (result.skill_activated)
         {
@@ -148,6 +202,9 @@ public:
         // 输出移动信息
         cout << "角色 " << character_name << " 从位置 " << pos << " 移动到位置 " << new_pos
              << "（实际步数: " << actual_step << "）" << endl;
+
+        // 移动后更新排名
+        update_rankings();
 
         return true;
     }
@@ -259,19 +316,38 @@ SkillResult move_double(int pos, const map *game_map)
     int dice = g_dice_dist(g_gen);
     return SkillResult(dice * 2, true); // 触发技能，步数翻倍
 }
+
+// 守岸人技能：骰子只会掷出2或3
+SkillResult move_minimum_two(int pos, const map *game_map)
+{
+    int dice_roll = g_range_dist(g_gen);
+
+    std::cout << "【触发技能】骰子最小值为2！" << std::endl;
+    return SkillResult(dice_roll, true); // 始终触发技能
+}
+
 int main()
 {
     map m(map_len);
-    vector<char_node *> char_list(2); // 修改为2个角色
+    vector<char_node *> char_list(4); // 修改为4个角色
 
     // 使用全局技能函数初始化角色
     char_list[0] = new char_node("椿", move_with_crowd_bonus);
-    char_list[1] = new char_node("柯莱塔", move_double_28); // 使用新技能
-    // 移除第三个角色
+    char_list[1] = new char_node("柯莱塔", move_double_28);
+    char_list[2] = new char_node("守岸人", move_minimum_two);
+    char_list[3] = new char_node("卡卡罗", default_skill); // 添加新角色，使用默认技能
+
+    // 注册角色到地图
+    for (auto character : char_list)
+    {
+        m.register_character(character);
+    }
 
     cout << "游戏开始！地图长度: " << map_len << endl;
     cout << "椿技能: 50%概率额外移动当前格其他角色数量的步数" << endl;
     cout << "柯莱塔技能: 28%的概率使得步数翻倍" << endl;
+    cout << "守岸人技能: 骰子只会掷出2或3" << endl;
+    cout << "卡卡罗技能: 无特殊能力，正常掷骰子(1-3)" << endl;
     cout << "-----------------------------------------" << endl;
 
     bool game_over = false;
