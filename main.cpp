@@ -7,7 +7,7 @@
 // #include "skill_functions.h" // 引入技能函数头文件
 
 using namespace std;
-const int MAP_LENGTH = 24;
+const int MAP_LENGTH = 27;
 
 // 全局随机数生成器
 random_device g_rd;
@@ -75,6 +75,7 @@ public:
     }
     char_node *get_end()
     {
+        // cout << "test" << endl;
         if (!next)
             return this;
         else
@@ -149,6 +150,7 @@ public:
         }
         return false;
     }
+    void set_pos(int new_pos, map *game_map);
 };
 struct map
 {
@@ -208,7 +210,7 @@ public:
         // 添加调试信息 - 记录角色信息
         string character_name = node->name;
 
-        if (character_name == "卡卡罗" && is_last_place(character_name))
+        if (character_name == "卡卡罗" && is_last_place(character_name) && node->pos != 0)
         {
             // cout << "卡卡罗处于最后位置，触发追赶技能！" << endl;
             result.steps += 3;
@@ -332,6 +334,16 @@ public:
         return -1;
     }
 };
+
+void char_node::set_pos(int new_pos, map *game_map)
+{
+
+    this->pos = new_pos;
+    this->prev = game_map->_map[new_pos]->get_end(); // 更新前驱节点
+    game_map->_map[new_pos]->get_end()->next = this; // 更新地图上的位置
+
+    game_map->cell_count[new_pos]++; // 增加格子角色数量
+}
 
 // 技能结果结构体，包含移动步数和是否触发技能
 
@@ -461,7 +473,7 @@ int main()
     cout << "当前随机数种子: " << seed << endl;
 
     // 模拟次数
-    const int SIMULATION_COUNT = 100000000;
+    const int SIMULATION_COUNT = 10000;
 
     // 统计信息
     GameStats stats(6); // 6个角色
@@ -481,6 +493,13 @@ int main()
         char_list[3] = new char_node("卡卡罗", default_skill);
         char_list[4] = new char_node("长离", default_skill);
         char_list[5] = new char_node("今汐", default_skill);
+
+        char_list[2]->set_pos(0, &m); // 守岸人初始位置为0
+        char_list[0]->set_pos(1, &m); // 椿初始位置为1
+        char_list[5]->set_pos(1, &m); // 今汐初始位置为1
+        char_list[4]->set_pos(2, &m); // 长离初始位置为2
+        char_list[1]->set_pos(2, &m); // 柯莱塔初始位置为2
+        char_list[3]->set_pos(3, &m); // 卡卡罗初始位置为3
 
         // 注册角色到地图
         for (auto character : char_list)
