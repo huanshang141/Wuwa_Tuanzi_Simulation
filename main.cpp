@@ -4,6 +4,8 @@
 #include <random>    // 添加随机数库
 #include <algorithm> // 添加algorithm库，包含shuffle函数
 #include <chrono>    // 用于获取时间戳作为种子
+#include <numeric>   // 用于accumulate
+#include <iomanip>   // 用于setprecision
 // #include "skill_functions.h" // 引入技能函数头文件
 
 using namespace std;
@@ -442,10 +444,15 @@ SkillResult move_minimum_two(int pos, const map *game_map)
 // 添加结构体用于存储统计信息
 struct GameStats
 {
-    vector<int> wins;           // 各角色胜场
-    vector<int> skill_triggers; // 各角色技能触发次数
+    vector<int> wins;             // 各角色胜场
+    vector<int> skill_triggers;   // 各角色技能触发次数
+    vector<vector<int>> rankings; // 各角色每局的排名
 
-    GameStats(int player_count) : wins(player_count, 0), skill_triggers(player_count, 0) {}
+    GameStats(int player_count) : wins(player_count, 0), skill_triggers(player_count, 0)
+    {
+        // 初始化排名数组，每个角色有一个排名记录数组
+        rankings.resize(player_count);
+    }
 
     // 打印统计信息
     void print_stats(const vector<string> &char_list) const
@@ -456,8 +463,67 @@ struct GameStats
             cout << char_list[i]
                  << " - 胜场: " << wins[i]
                  << " (" << (wins[i] * 100.0 / accumulate(wins.begin(), wins.end(), 0)) << "%)" << endl;
+
+            // 添加平均排名信息
+            if (!rankings[i].empty())
+            {
+                double avg_rank = accumulate(rankings[i].begin(), rankings[i].end(), 0.0) / rankings[i].size();
+                cout << "    平均排名: " << fixed << setprecision(2) << avg_rank << endl;
+            }
         }
         cout << "===================" << endl;
+    }
+
+    // 计算指定角色的排名分布
+    vector<int> get_rank_distribution(int player_index, int max_rank) const
+    {
+        vector<int> distribution(max_rank, 0); // 初始化为0
+
+        for (int rank : rankings[player_index])
+        {
+            if (rank > 0 && rank <= max_rank)
+            {
+                distribution[rank - 1]++; // 排名从1开始，数组索引从0开始
+            }
+        }
+
+        return distribution;
+    }
+
+    // 绘制ASCII柱状图显示排名分布
+    void draw_rank_chart(const vector<string> &char_list) const
+    {
+        const int max_rank = 6; // 最多6名角色
+
+        for (size_t i = 0; i < char_list.size(); i++)
+        {
+            cout << "\n=== " << char_list[i] << " 排名分布 ===" << endl;
+
+            vector<int> distribution = get_rank_distribution(i, max_rank);
+            int max_count = *max_element(distribution.begin(), distribution.end());
+
+            // 确定比例尺
+            const int max_bar_width = 40;
+            double scale = max_count > 0 ? max_bar_width / (double)max_count : 0;
+
+            // 绘制柱状图
+            for (int rank = 0; rank < max_rank; rank++)
+            {
+                int count = distribution[rank];
+                int bar_width = static_cast<int>(count * scale);
+
+                cout << "第" << (rank + 1) << "名: ";
+                cout << string(bar_width, '#') << " " << count;
+
+                // 显示百分比
+                if (rankings[i].size() > 0)
+                {
+                    double percentage = (count * 100.0) / rankings[i].size();
+                    cout << " (" << fixed << setprecision(1) << percentage << "%)";
+                }
+                cout << endl;
+            }
+        }
     }
 };
 
@@ -473,7 +539,7 @@ int main()
     cout << "当前随机数种子: " << seed << endl;
 
     // 模拟次数
-    const int SIMULATION_COUNT = 10000;
+    const int SIMULATION_COUNT = 10000; // 增加模拟次数以获得更准确的统计结果
 
     // 统计信息
     GameStats stats(6); // 6个角色
@@ -606,6 +672,16 @@ int main()
                     if (verbose)
                         cout << "\n恭喜！" << char_list[idx]->name << " 到达终点，游戏结束！" << endl;
                     stats.wins[idx]++; // 记录胜场
+
+                    // 记录所有角色的最终排名
+                    for (size_t j = 0; j < char_list.size(); j++)
+                    {
+                        int rank = m.get_rank_by_name(char_list[j]->name);
+                        stats.rankings[j].push_back(rank);
+                        if (verbose)
+                            cout << char_list[j]->name << " 本局排名: " << rank << endl;
+                    }
+
                     game_over = true;
                     break;
                 }
@@ -646,7 +722,11 @@ int main()
     cout << "\n===== 模拟结束 =====" << endl;
     cout << "总模拟次数: " << SIMULATION_COUNT << endl;
 
-    stats.print_stats(vector<string>{"椿", "柯莱塔", "守岸人", "卡卡罗", "长离", "今汐"});
+    vector<string> character_names = {"椿", "柯莱塔", "守岸人", "卡卡罗", "长离", "今汐"};
+    stats.print_stats(character_names);
+
+    // 绘制排名分布图表
+    stats.draw_rank_chart(character_names);
 
     return 0;
 }
